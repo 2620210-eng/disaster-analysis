@@ -84,12 +84,9 @@ if st.button("📊 로그 파싱 및 위험 시간대 분석", type="primary"):
         try:
             parsed_data = []
             
-            # [수정/강화된 정규식 파서]
-            # 14:29:03.031 같은 시간 포맷 추출 패턴
+            # 정규식 패턴 정의
             time_pattern = re.compile(r'(\d{2}:\d{2}:\d{2})')
-            # 대괄호 [ ... ] 제거 패턴
             bracket_pattern = re.compile(r'\[.*?\]')
-            # 숫자(실수/정수) 2개 연속 추출 패턴 (예: 12.98, 0)
             sensor_pattern = re.compile(r'([-+]?\d*\.?\d+)\s*,\s*([-+]?\d*\.?\d+)')
 
             for line in raw_text.strip().splitlines():
@@ -97,14 +94,15 @@ if st.button("📊 로그 파싱 및 위험 시간대 분석", type="primary"):
                 if not line:
                     continue
                 
-                # 1. 시간 추출 (줄 전체에서 HH:MM:SS 검색)
-                t_match = time_pattern.search(line)
+                # 1. '->' 앞쪽 텍스트에서만 실제 컴퓨터 시각(HH:MM:SS) 추출
+                time_part = line.split('->')[0] if '->' in line else line
+                t_match = time_pattern.search(time_part)
                 clean_time = t_match.group(1) if t_match else None
 
-                # 2. 대괄호 [ ... ] 제거
+                # 2. 대괄호 [ ... ] 내부(부팅시간 등) 제거
                 clean_line = bracket_pattern.sub('', line)
 
-                # 3. 거리, 진동 수치 추출 (마지막 숫자,숫자 형태 감지)
+                # 3. 거리, 진동 수치 추출
                 s_match = sensor_pattern.search(clean_line)
                 if s_match:
                     try:
@@ -163,12 +161,12 @@ if st.button("📊 로그 파싱 및 위험 시간대 분석", type="primary"):
                 with col2:
                     st.metric("지진/산사태 감지 횟수", f"{df['Quake_Danger'].sum()}회")
 
-                # 주요 위험 집중 시간대 추출 로직 (대용량 데이터 대응)
+                # 주요 위험 집중 시간대 추출 (실제 컴퓨터 시각 기준)
                 most_frequent_time_str = "감지된 위험 없음 (정상 범위)"
                 if len(danger_df) > 0:
                     valid_times = danger_df['Time'].dropna()
                     if not valid_times.empty:
-                        # HH:MM 단위로 그룹화하여 최고 빈도 시간대 도출
+                        # HH:MM 단위로 그룹화하여 최다 발생 시각 추출
                         hour_mins = valid_times.apply(lambda x: str(x)[:5] if len(str(x)) >= 5 else str(x))
                         top_modes = hour_mins.mode()
                         if not top_modes.empty:
