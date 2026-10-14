@@ -27,7 +27,6 @@ with col_header:
 with col_reset:
     st.write("") # 버튼 위치 맞춤용 여백
     st.write("")
-    # on_click 콜백을 통해 입력창 세션 값을 직접 초기화
     st.button("🗑️ 전체 입력/기록 삭제", type="secondary", use_container_width=True, on_click=clear_text)
 
 # 시스템 안내 펼침상자
@@ -47,13 +46,29 @@ with st.expander("📖 시스템 사용 방법 및 개발 목적 (클릭하여 �
     4. **결과 확인:** 
        * **통계 요약:** 평균/최대/최소 수위 및 진동 수치 확인
        * **골든타임 분석:** 침수/지진 감지 횟수 및 최다 위험 발생 시간대 확인
+       * **시간대별 경보 수준 그래프:** 시간에 따른 위험 레벨 및 경보 발생 분포 확인
        * **시계열 추이:** 시간에 따른 수위 및 진동 변화 그래프 확인
     """)
 
 st.write("---")
 st.write("시리얼 모니터의 데이터를 복사해 붙여넣으면 시간대별 위험 분석 결과를 생성합니다.")
 
-# 1. 시리얼 로그 입력 영역 (key 기반 직접 관리)
+# 상태 판별 및 레벨 부여 함수
+def evaluate_status(dist, vib):
+    if vib > 15.0:
+        return "산사태 심각", 4
+    elif 0.5 < dist <= 11.0:
+        return "침수 심각", 3
+    elif 11.0 < dist <= 13.0:
+        return "수위 경고", 2
+    elif 13.0 < dist <= 15.0:
+        return "수위 주의", 1
+    elif dist > 15.0:
+        return "안전", 0
+    else:
+        return "미감지", 0
+
+# 1. 시리얼 로그 입력 영역
 raw_text = st.text_area(
     "센서 시리얼 로그 데이터 입력 (타임스탬프 포함)", 
     height=200, 
@@ -78,27 +93,28 @@ if st.button("📊 로그 파싱 및 위험 시간대 분석", type="primary"):
                 time_str = None
                 data_str = line
                 
-                # '->' 구분자가 있는 타임스탬프 형태 분리
                 if '->' in line:
                     parts = line.split('->')
                     time_str = parts[0].strip()
                     data_str = parts[1].strip()
                 
-                # 수위, 진동 값 파싱
                 sensor_parts = data_str.split(',')
                 if len(sensor_parts) == 2:
                     try:
                         dist = float(sensor_parts[0].strip())
                         vib = float(sensor_parts[1].strip())
                         
-                        # 시각 추출 (HH:MM:SS)
                         time_match = re.search(r'(\d{2}:\d{2}:\d{2})', time_str) if time_str else None
                         clean_time = time_match.group(1) if time_match else None
+                        
+                        status_str, status_level = evaluate_status(dist, vib)
                         
                         parsed_data.append({
                             'Time': clean_time,
                             'Distance_cm': dist,
-                            'Vibration': vib
+                            'Vibration': vib,
+                            'Status': status_str,
+                            'Status_Level': status_level
                         })
                     except ValueError:
                         continue
@@ -129,9 +145,9 @@ if st.button("📊 로그 파싱 및 위험 시간대 분석", type="primary"):
                 st.dataframe(stats.round(2), use_container_width=True)
 
                 # [분석 2] 위험 조건 카운트 및 집중 시간대 도출
-                df['Flood_Danger'] = (df['Distance_cm'] > 0.5) & (df['Distance_cm'] <= 11.0)
-                df['Quake_Danger'] = df['Vibration'] > 15.0  # 아두이노 임계값(15) 반영
-                df['Is_Danger'] = df['Flood_Danger'] | df['Quake_Danger']
+                df['Flood_Danger'] = df['Status'] == "침수 심각"
+                df['Quake_Danger'] = df['Status'] == "산사태 심각"
+                df['Is_Danger'] = df['Status_Level'] >= 3
 
                 danger_df = df[df['Is_Danger']]
 
@@ -154,15 +170,37 @@ if st.button("📊 로그 파싱 및 위험 시간대 분석", type="primary"):
                         
                         st.write("📋 **위험 이벤트 로그 목록:**")
                         st.dataframe(
-                            danger_df[['Time', 'Distance_cm', 'Vibration']], 
+                            danger_df[['Time', 'Distance_cm', 'Vibration', 'Status']], 
                             use_container_width=True,
                             hide_index=True
                         )
                     else:
                         st.info("✅ 데이터 수집 기간 내 위험 상태가 감지되지 않았습니다. (안전)")
 
-                # [분석 3] 시계열 그래프
-                st.subheader("📉 시간에 따른 센서 데이터 추이")
+                st.markdown("---")
+
+                # [분석 3] 시간대별 경보 수준 분석 (신규 추가 기능)
+                st.subheader("🚨 시간대별 경보 수준 분석")
+                chart_col1, chart_col2 = st.columns(2)
+
+                with chart_col1:
+                    st.markdown("##### 📊 경보 단계별 감지 횟수")
+                    status_counts = df['Status'].value_counts()
+                    st.bar_chart(status_counts)
+
+                with chart_col2:
+                    st.markdown("##### 📈 시간에 따른 경보 레벨 변화 추이")
+                    st.caption("레벨 기준: 0(안전) ➔ 1(수위 주의) ➔ 2(수위 경고) ➔ 3(침수 심각) ➔ 4(산사태 심각)")
+                    if 'Time' in df.columns and df['Time'].notna().any():
+                        level_chart_df = df.set_index('Time')[['Status_Level']]
+                        st.line_chart(level_chart_df)
+                    else:
+                        st.line_chart(df[['Status_Level']])
+
+                st.markdown("---")
+
+                # [분석 4] 시계열 원본 센서 그래프
+                st.subheader("📉 시간에 따른 원본 센서 데이터 추이")
                 if 'Time' in df.columns and df['Time'].notna().any():
                     chart_df = df.set_index('Time')[['Distance_cm', 'Vibration']]
                     st.line_chart(chart_df)
