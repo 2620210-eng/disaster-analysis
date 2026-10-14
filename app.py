@@ -47,7 +47,7 @@ with st.expander("📖 시스템 사용 방법 및 개발 목적 (클릭하여 �
        * **통계 요약:** 평균/최대/최소 수위 및 진동 수치 확인
        * **골든타임 분석:** 침수/지진 감지 횟수 및 최다 위험 발생 시간대 확인
        * **시간대별 경보 수준 그래프:** 시간에 따른 위험 레벨 및 경보 발생 분포 확인
-       * **시계열 추이:** 시간에 따른 수위 및 진동 변화 그래프 확인
+       * **종합 대처 보고서:** 주요 집중 시간대 및 시스템 자동 대처 현황 확인
     """)
 
 st.write("---")
@@ -179,7 +179,7 @@ if st.button("📊 로그 파싱 및 위험 시간대 분석", type="primary"):
 
                 st.markdown("---")
 
-                # [분석 3] 시간대별 경보 수준 분석 (신규 추가 기능)
+                # [분석 3] 시간대별 경보 수준 분석
                 st.subheader("🚨 시간대별 경보 수준 분석")
                 chart_col1, chart_col2 = st.columns(2)
 
@@ -206,6 +206,48 @@ if st.button("📊 로그 파싱 및 위험 시간대 분석", type="primary"):
                     st.line_chart(chart_df)
                 else:
                     st.line_chart(df[['Distance_cm', 'Vibration']])
+
+                st.markdown("---")
+
+                # [분석 5] 📋 종합 관제 요약 및 자동 대처 보고서 (새로 추가된 부분!)
+                st.subheader("📋 종합 관제 요약 & 시스템 대처 리포트")
+                
+                # 주요 집중 시간대 계산
+                time_summary_text = "위험 상황 미발생"
+                if len(danger_df) > 0 and 'Time' in danger_df.columns and danger_df['Time'].notna().any():
+                    danger_df_copy = danger_df.copy()
+                    danger_df_copy['Hour_Min'] = danger_df_copy['Time'].apply(lambda x: str(x)[:5] if pd.notna(x) else None)
+                    top_time = danger_df_copy['Hour_Min'].mode()
+                    if not top_time.empty:
+                        time_summary_text = f"약 **{top_time.iloc[0]}** 부근 집중"
+
+                flood_cnt = df['Flood_Danger'].sum()
+                quake_cnt = df['Quake_Danger'].sum()
+                total_danger_cnt = flood_cnt + quake_cnt
+
+                rep_col1, rep_col2 = st.columns(2)
+
+                with rep_col1:
+                    st.markdown("##### 🕒 1. 위험 발생 분석 요약")
+                    st.markdown(f"""
+                    * **주요 위험 집중 시간대:** {time_summary_text}
+                    * **🌊 침수 심각 감지:** **{flood_cnt}회** (수위 0.5cm ~ 11.0cm)
+                    * **⛰️ 산사태/지진 감지:** **{quake_cnt}회** (진동 수치 15 초과)
+                    * **총 위험 이벤트:** 총 **{total_danger_cnt}회** 발생
+                    """)
+
+                with rep_col2:
+                    st.markdown("##### 🛡️ 2. 하드웨어 자동 대처 현황")
+                    
+                    barrier_status = "🚨 **[작동 완료]** 차단막 하강 (진입 통제)" if total_danger_cnt > 0 else "🟢 **[대기 중]** 통행 가능"
+                    pump_status = "🚨 **[가동 완료]** 배수 펌프 비상 동작" if flood_cnt > 0 else "🟢 **[대기 중]** 수위 안정"
+                    alarm_status = "🚨 **[경보 발령]** 현장 사이렌 & LED 켜짐" if total_danger_cnt > 0 else "🟢 **[정상]** 평시 관제 상태"
+
+                    st.markdown(f"""
+                    * **🚧 진입 차단막 (서보 모터):** {barrier_status}
+                    * **🌊 비상 배수 펌프 (모터 릴레이):** {pump_status}
+                    * **🔔 현장 경보 장치:** {alarm_status}
+                    """)
 
         except Exception as e:
             st.error(f"❌ 데이터 분석 중 오류 발생: {e}")
