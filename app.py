@@ -25,7 +25,7 @@ with col_header:
     st.title("🚨 스마트 재난 대응 센서 & 시간대별 위험 분석기")
 
 with col_reset:
-    st.write("") # 버튼 위치 맞춤용 여백
+    st.write("") 
     st.write("")
     st.button("🗑️ 전체 입력/기록 삭제", type="secondary", use_container_width=True, on_click=clear_text)
 
@@ -159,23 +159,27 @@ if st.button("📊 로그 파싱 및 위험 시간대 분석", type="primary"):
                 with col2:
                     st.metric("지진/산사태 감지 횟수", f"{df['Quake_Danger'].sum()}회")
 
-                if 'Time' in df.columns and df['Time'].notna().any():
-                    if len(danger_df) > 0 and danger_df['Time'].notna().any():
-                        danger_df_copy = danger_df.copy()
-                        danger_df_copy['Hour_Min'] = danger_df_copy['Time'].apply(lambda x: str(x)[:5] if pd.notna(x) else None)
-                        most_frequent_time = danger_df_copy['Hour_Min'].mode()
-                        
-                        if not most_frequent_time.empty:
-                            st.error(f"🚨 **주요 위험 집중 시간대:** 약 **{most_frequent_time.iloc[0]}** 부근에 빈번한 위험이 감지되었습니다.")
-                        
-                        st.write("📋 **위험 이벤트 로그 목록:**")
-                        st.dataframe(
-                            danger_df[['Time', 'Distance_cm', 'Vibration', 'Status']], 
-                            use_container_width=True,
-                            hide_index=True
-                        )
-                    else:
-                        st.info("✅ 데이터 수집 기간 내 위험 상태가 감지되지 않았습니다. (안전)")
+                # 주요 위험 집중 시간대 추출 로직 개선
+                most_frequent_time_str = "시간 정보 없음"
+                if len(danger_df) > 0:
+                    valid_times = danger_df['Time'].dropna()
+                    if not valid_times.empty:
+                        # HH:MM 형식으로 자르기
+                        hour_mins = valid_times.apply(lambda x: str(x)[:5] if len(str(x)) >= 5 else str(x))
+                        top_modes = hour_mins.mode()
+                        if not top_modes.empty:
+                            most_frequent_time_str = f"약 **{top_modes.iloc[0]}** 부근"
+                        else:
+                            most_frequent_time_str = f"약 **{hour_mins.iloc[0]}** 부근"
+                    st.error(f"🚨 **주요 위험 집중 시간대:** {most_frequent_time_str}에 빈번한 위험이 감지되었습니다.")
+                    st.write("📋 **위험 이벤트 로그 목록:**")
+                    st.dataframe(
+                        danger_df[['Time', 'Distance_cm', 'Vibration', 'Status']], 
+                        use_container_width=True,
+                        hide_index=True
+                    )
+                else:
+                    st.info("✅ 데이터 수집 기간 내 위험 상태가 감지되지 않았습니다. (안전)")
 
                 st.markdown("---")
 
@@ -209,21 +213,18 @@ if st.button("📊 로그 파싱 및 위험 시간대 분석", type="primary"):
 
                 st.markdown("---")
 
-                # [분석 5] 📋 종합 관제 요약 및 자동 대처 보고서 (새로 추가된 부분!)
+                # [분석 5] 📋 종합 관제 요약 및 자동 대처 보고서 (오류 수정 완료)
                 st.subheader("📋 종합 관제 요약 & 시스템 대처 리포트")
-                
-                # 주요 집중 시간대 계산
-                time_summary_text = "위험 상황 미발생"
-                if len(danger_df) > 0 and 'Time' in danger_df.columns and danger_df['Time'].notna().any():
-                    danger_df_copy = danger_df.copy()
-                    danger_df_copy['Hour_Min'] = danger_df_copy['Time'].apply(lambda x: str(x)[:5] if pd.notna(x) else None)
-                    top_time = danger_df_copy['Hour_Min'].mode()
-                    if not top_time.empty:
-                        time_summary_text = f"약 **{top_time.iloc[0]}** 부근 집중"
 
                 flood_cnt = df['Flood_Danger'].sum()
                 quake_cnt = df['Quake_Danger'].sum()
                 total_danger_cnt = flood_cnt + quake_cnt
+
+                # 위험 발생 문구 바인딩
+                if total_danger_cnt > 0:
+                    time_summary_text = most_frequent_time_str
+                else:
+                    time_summary_text = "위험 상황 미발생 (안전)"
 
                 rep_col1, rep_col2 = st.columns(2)
 
