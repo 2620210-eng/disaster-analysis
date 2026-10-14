@@ -84,34 +84,32 @@ if st.button("📊 로그 파싱 및 위험 시간대 분석", type="primary"):
         try:
             parsed_data = []
             
-            # 한 줄씩 읽어서 파싱
+            # [수정/강화된 정규식 파서]
+            # 14:29:03.031 같은 시간 포맷 추출 패턴
+            time_pattern = re.compile(r'(\d{2}:\d{2}:\d{2})')
+            # 대괄호 [ ... ] 제거 패턴
+            bracket_pattern = re.compile(r'\[.*?\]')
+            # 숫자(실수/정수) 2개 연속 추출 패턴 (예: 12.98, 0)
+            sensor_pattern = re.compile(r'([-+]?\d*\.?\d+)\s*,\s*([-+]?\d*\.?\d+)')
+
             for line in raw_text.strip().splitlines():
                 line = line.strip()
                 if not line:
                     continue
                 
-                time_str = None
-                data_str = line
-                
-                # 1) '->' 기준으로 시간 영역과 데이터 영역 분리
-                if '->' in line:
-                    parts = line.split('->', 1)
-                    time_str = parts[0].strip()
-                    data_str = parts[1].strip()
-                
-                # 2) 대괄호 [ ... ] 내부 문자열 제거 (예: [00:01:44 / 104089ms] 삭제)
-                data_str = re.sub(r'\[.*?\]', '', data_str).strip()
-                
-                # 3) 거리 및 진동값 쉼표(,) 추출
-                sensor_parts = data_str.split(',')
-                if len(sensor_parts) == 2:
+                # 1. 시간 추출 (줄 전체에서 HH:MM:SS 검색)
+                t_match = time_pattern.search(line)
+                clean_time = t_match.group(1) if t_match else None
+
+                # 2. 대괄호 [ ... ] 제거
+                clean_line = bracket_pattern.sub('', line)
+
+                # 3. 거리, 진동 수치 추출 (마지막 숫자,숫자 형태 감지)
+                s_match = sensor_pattern.search(clean_line)
+                if s_match:
                     try:
-                        dist = float(sensor_parts[0].strip())
-                        vib = float(sensor_parts[1].strip())
-                        
-                        # HH:MM:SS 시각 정규식 추출
-                        time_match = re.search(r'(\d{2}:\d{2}:\d{2})', time_str) if time_str else None
-                        clean_time = time_match.group(1) if time_match else None
+                        dist = float(s_match.group(1))
+                        vib = float(s_match.group(2))
                         
                         status_str, status_level = evaluate_status(dist, vib)
                         
@@ -165,27 +163,28 @@ if st.button("📊 로그 파싱 및 위험 시간대 분석", type="primary"):
                 with col2:
                     st.metric("지진/산사태 감지 횟수", f"{df['Quake_Danger'].sum()}회")
 
-                # 주요 위험 집중 시간대 추출 로직 개선
-                most_frequent_time_str = "시간 정보 없음"
+                # 주요 위험 집중 시간대 추출 로직 (대용량 데이터 대응)
+                most_frequent_time_str = "감지된 위험 없음 (정상 범위)"
                 if len(danger_df) > 0:
                     valid_times = danger_df['Time'].dropna()
                     if not valid_times.empty:
-                        # HH:MM 형식으로 자르기
+                        # HH:MM 단위로 그룹화하여 최고 빈도 시간대 도출
                         hour_mins = valid_times.apply(lambda x: str(x)[:5] if len(str(x)) >= 5 else str(x))
                         top_modes = hour_mins.mode()
                         if not top_modes.empty:
                             most_frequent_time_str = f"약 **{top_modes.iloc[0]}** 부근"
                         else:
                             most_frequent_time_str = f"약 **{hour_mins.iloc[0]}** 부근"
+                    
                     st.error(f"🚨 **주요 위험 집중 시간대:** {most_frequent_time_str}에 빈번한 위험이 감지되었습니다.")
-                    st.write("📋 **위험 이벤트 로그 목록:**")
+                    st.write("📋 **위험 이벤트 로그 목록 (상위 100건):**")
                     st.dataframe(
-                        danger_df[['Time', 'Distance_cm', 'Vibration', 'Status']], 
+                        danger_df[['Time', 'Distance_cm', 'Vibration', 'Status']].head(100), 
                         use_container_width=True,
                         hide_index=True
                     )
                 else:
-                    st.info("✅ 데이터 수집 기간 내 위험 상태가 감지되지 않았습니다. (안전)")
+                    st.info("✅ 데이터 수집 기간 내 위험 상태(침수/산사태 심각)가 감지되지 않았습니다. (안전)")
 
                 st.markdown("---")
 
