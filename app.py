@@ -9,12 +9,27 @@ st.set_page_config(
     layout="wide"
 )
 
+# 세션 상태 초기화 (입력 텍스트 관리용)
+if "raw_text_input" not in st.session_state:
+    st.session_state.raw_text_input = ""
+
 # 사이드바 관제 센터
 st.sidebar.title("🛡️ 재난 관제 시스템")
 st.sidebar.success("● 시스템 상태: 가동 중")
 st.sidebar.info("연결 장치: 초음파 센서, 진동 센서, 모터 릴레이, 서보 차단막")
 
-st.title("🚨 스마트 재난 대응 센서 & 시간대별 위험 분석기")
+# 헤더 영역 및 삭제 버튼 배치
+col_header, col_reset = st.columns([4, 1])
+
+with col_header:
+    st.title("🚨 스마트 재난 대응 센서 & 시간대별 위험 분석기")
+
+with col_reset:
+    st.write("") # 버튼 위치 맞춤용 여백
+    st.write("")
+    if st.button("🗑️ 전체 입력/기록 삭제", type="secondary", use_container_width=True):
+        st.session_state.raw_text_input = ""
+        st.rerun()
 
 # 시스템 안내 펼침상자
 with st.expander("📖 시스템 사용 방법 및 개발 목적 (클릭하여 확인)", expanded=False):
@@ -39,15 +54,20 @@ with st.expander("📖 시스템 사용 방법 및 개발 목적 (클릭하여 �
 st.write("---")
 st.write("시리얼 모니터의 데이터를 복사해 붙여넣으면 시간대별 위험 분석 결과를 생성합니다.")
 
-# 1. 시리얼 로그 입력 영역
+# 1. 시리얼 로그 입력 영역 (세션 상태와 연동)
 raw_text = st.text_area(
     "센서 시리얼 로그 데이터 입력 (타임스탬프 포함)", 
+    value=st.session_state.raw_text_input,
     height=200, 
-    placeholder="예시:\n15:58:03.807 -> 14.82,9\n15:58:05.571 -> 10.19,0\n15:58:09.179 -> 9.83,85"
+    placeholder="예시:\n15:58:03.807 -> 14.82,9\n15:58:05.571 -> 10.19,0\n15:58:09.179 -> 9.83,85",
+    key="text_area_key"
 )
 
 # 2. 데이터 분석 실행 버튼
 if st.button("📊 로그 파싱 및 위험 시간대 분석", type="primary"):
+    # 현재 입력된 텍스트 세션에 저장
+    st.session_state.raw_text_input = raw_text
+    
     if not raw_text.strip():
         st.warning("⚠️ 분석할 데이터를 입력해 주세요.")
     else:
@@ -115,7 +135,7 @@ if st.button("📊 로그 파싱 및 위험 시간대 분석", type="primary"):
 
                 # [분석 2] 위험 조건 카운트 및 집중 시간대 도출
                 df['Flood_Danger'] = (df['Distance_cm'] > 0.5) & (df['Distance_cm'] <= 11.0)
-                df['Quake_Danger'] = df['Vibration'] > 15.0  # 아두이노 기준 임계값(15) 반영
+                df['Quake_Danger'] = df['Vibration'] > 15.0  # 아두이노 임계값(15) 반영
                 df['Is_Danger'] = df['Flood_Danger'] | df['Quake_Danger']
 
                 danger_df = df[df['Is_Danger']]
@@ -130,7 +150,6 @@ if st.button("📊 로그 파싱 및 위험 시간대 분석", type="primary"):
 
                 if 'Time' in df.columns and df['Time'].notna().any():
                     if len(danger_df) > 0 and danger_df['Time'].notna().any():
-                        # 분 단위까지 그룹화하여 위험 빈도 계산 (예: 15:58)
                         danger_df_copy = danger_df.copy()
                         danger_df_copy['Hour_Min'] = danger_df_copy['Time'].apply(lambda x: str(x)[:5] if pd.notna(x) else None)
                         most_frequent_time = danger_df_copy['Hour_Min'].mode()
