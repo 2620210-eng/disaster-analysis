@@ -42,32 +42,42 @@ with col_clear:
 
 st.markdown("---")
 
-# 4. 📥 센서 데이터 직접 입력용 사이드바 (입력 공간)
-st.sidebar.header("📥 센서 데이터 테스트 입력")
-st.sidebar.write("아래 창에서 수위와 진동 값을 직접 입력하여 테스트할 수 있습니다.")
+# 4. 📟 시리얼 텍스트 데이터 입력 사이드바
+st.sidebar.header("📟 시리얼 텍스트 입력")
+st.sidebar.write("아두이노 시리얼 모니터 형식의 텍스트를 입력하세요.")
+st.sidebar.caption("예시: `12.5,5` (수위,진동)")
 
-input_dist = st.sidebar.number_input("수위 거리 (cm)", min_value=0.0, max_value=100.0, value=14.0, step=0.5)
-input_vib = st.sidebar.number_input("진동 수치", min_value=0, max_value=1000, value=5, step=1)
+# 시리얼 텍스트 입력창
+serial_input = st.sidebar.text_input("시리얼 데이터 (수위,진동)", value="12.5,5")
 
-if st.sidebar.button("➕ 데이터 전송 (기록 추가)", type="primary", use_container_width=True):
-    now_time = datetime.datetime.now().strftime("%H:%M:%S")
-    status_result = get_status(input_dist, input_vib)
-    
-    # 데이터 추가
-    new_entry = {
-        "시각": now_time,
-        "수위(cm)": input_dist,
-        "진동": input_vib,
-        "상태": status_result
-    }
-    st.session_state.data_logs.append(new_entry)
-    
-    # 최근 100개만 유지
-    if len(st.session_state.data_logs) > 100:
-        st.session_state.data_logs.pop(0)
-        
-    st.sidebar.success(f"입력 완료! (상태: {status_result})")
-    st.rerun()
+if st.sidebar.button("📥 시리얼 데이터 전송", type="primary", use_container_width=True):
+    try:
+        # 텍스트 파싱 (콤마 기준 분리)
+        parts = serial_input.strip().split(',')
+        if len(parts) == 2:
+            dist_val = float(parts[0])
+            vib_val = int(parts[1])
+            
+            now_time = datetime.datetime.now().strftime("%H:%M:%S")
+            status_result = get_status(dist_val, vib_val)
+            
+            new_entry = {
+                "시각": now_time,
+                "수위(cm)": dist_val,
+                "진동": vib_val,
+                "상태": status_result
+            }
+            st.session_state.data_logs.append(new_entry)
+            
+            if len(st.session_state.data_logs) > 100:
+                st.session_state.data_logs.pop(0)
+                
+            st.sidebar.success(f"수신 성공: {serial_input}")
+            st.rerun()
+        else:
+            st.sidebar.error("형식이 올바르지 않습니다. `12.5,5` 형태로 입력해주세요.")
+    except ValueError:
+        st.sidebar.error("숫자 형식으로 입력해주세요. 예: `10.5,3`")
 
 # 5. 현재 감지 상태 표시 카드
 st.subheader("현재 감지 상태")
@@ -89,11 +99,10 @@ if len(st.session_state.data_logs) > 0:
     col_stat1.metric("현재 수위 거리", f"{cur_dist:.1f} cm")
     col_stat2.metric("현재 진동 수치", f"{cur_vib}")
 else:
-    st.info("💡 오른쪽 왼쪽 사이드바에서 센서 수치를 입력하고 [데이터 전송] 버튼을 눌러주세요.")
+    st.info("💡 왼쪽 사이드바에서 시리얼 텍스트(예: `10.5,20`)를 입력하고 [시리얼 데이터 전송] 버튼을 눌러주세요.")
 
 st.markdown("---")
 
-# DataFrame 변환
 df = pd.DataFrame(st.session_state.data_logs)
 
 # 6. ⚡ 심각 경보 발생 요약
@@ -146,7 +155,6 @@ with col3:
 with col4:
     st.markdown("##### 전체 데이터 로그")
     if not df.empty:
-        # 최근 데이터가 상단에 오도록 최신순 정렬
         st.dataframe(
             df.iloc[::-1],
             use_container_width=True,
