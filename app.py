@@ -89,7 +89,7 @@ if st.button("📊 로그 파싱 및 위험 시간대 분석", type="primary"):
             bracket_pattern = re.compile(r'\[.*?\]')
             sensor_pattern = re.compile(r'([-+]?\d*\.?\d+)\s*,\s*([-+]?\d*\.?\d+)')
 
-            for line in raw_text.strip().splitlines():
+            for idx, line in enumerate(raw_text.strip().splitlines(), start=1):
                 line = line.strip()
                 if not line:
                     continue
@@ -122,6 +122,7 @@ if st.button("📊 로그 파싱 및 위험 시간대 분석", type="primary"):
                         status_str, status_level = evaluate_status(dist, vib)
                         
                         parsed_data.append({
+                            'Seq': idx,
                             'Time': clean_time,
                             'Distance_cm': dist,
                             'Vibration': vib,
@@ -171,14 +172,13 @@ if st.button("📊 로그 파싱 및 위험 시간대 분석", type="primary"):
                 with col2:
                     st.metric("지진/산사태 감지 횟수", f"{df['Quake_Danger'].sum()}회")
 
-                # 주요 위험 집중 시간대 추출 로직 (None 및 예외 결측치 완전 배제)
+                # 주요 위험 집중 시간대 추출 로직
                 most_frequent_time_str = "감지된 위험 없음 (정상 범위)"
                 if len(danger_df) > 0:
                     valid_times = danger_df['Time'].dropna()
                     valid_times = valid_times[valid_times.astype(str).str.strip() != '']
                     
                     if not valid_times.empty:
-                        # HH:MM 단위로 잘라 최빈 시간대 도출 (예: 14:29)
                         hour_mins = valid_times.apply(lambda x: str(x)[:5])
                         top_modes = hour_mins.mode()
                         if not top_modes.empty:
@@ -186,12 +186,17 @@ if st.button("📊 로그 파싱 및 위험 시간대 분석", type="primary"):
                         else:
                             most_frequent_time_str = f"약 **{hour_mins.iloc[0]}** 부근"
                     else:
-                        most_frequent_time_str = "시간 정보 없음 (타임스탬프 누락)"
+                        # 타임스탬프가 아예 없는 경우 수집 순서(Seq) 범위 안내
+                        min_seq = danger_df['Seq'].min()
+                        max_seq = danger_df['Seq'].max()
+                        most_frequent_time_str = f"타임스탬프 누락 (데이터 #{min_seq} ~ #{max_seq} 구간 위험 발생)"
                     
-                    st.error(f"🚨 **주요 위험 집중 시간대:** {most_frequent_time_str}에 빈번한 위험이 감지되었습니다.")
+                    st.error(f"🚨 **주요 위험 집중 구간:** {most_frequent_time_str}")
                     st.write("📋 **위험 이벤트 로그 목록 (상위 100건):**")
+                    
+                    show_cols = ['Seq', 'Time', 'Distance_cm', 'Vibration', 'Status'] if df['Time'].notna().any() else ['Seq', 'Distance_cm', 'Vibration', 'Status']
                     st.dataframe(
-                        danger_df[['Time', 'Distance_cm', 'Vibration', 'Status']].head(100), 
+                        danger_df[show_cols].head(100), 
                         use_container_width=True,
                         hide_index=True
                     )
@@ -200,8 +205,8 @@ if st.button("📊 로그 파싱 및 위험 시간대 분석", type="primary"):
 
                 st.markdown("---")
 
-                # [분석 3] 시간대별 경보 수준 분석
-                st.subheader("🚨 시간대별 경보 수준 분석")
+                # [분석 3] 시간대별/순서별 경보 수준 분석
+                st.subheader("🚨 경보 수준 및 추이 분석")
                 chart_col1, chart_col2 = st.columns(2)
 
                 with chart_col1:
@@ -210,23 +215,23 @@ if st.button("📊 로그 파싱 및 위험 시간대 분석", type="primary"):
                     st.bar_chart(status_counts)
 
                 with chart_col2:
-                    st.markdown("##### 📈 시간에 따른 경보 레벨 변화 추이")
+                    st.markdown("##### 📈 경보 레벨 변화 추이")
                     st.caption("레벨 기준: 0(안전) ➔ 1(수위 주의) ➔ 2(수위 경고) ➔ 3(침수 심각) ➔ 4(산사태 심각)")
                     if 'Time' in df.columns and df['Time'].notna().any():
                         level_chart_df = df.dropna(subset=['Time']).set_index('Time')[['Status_Level']]
                         st.line_chart(level_chart_df)
                     else:
-                        st.line_chart(df[['Status_Level']])
+                        st.line_chart(df.set_index('Seq')[['Status_Level']])
 
                 st.markdown("---")
 
                 # [분석 4] 시계열 원본 센서 그래프
-                st.subheader("📉 시간에 따른 원본 센서 데이터 추이")
+                st.subheader("📉 원본 센서 데이터 추이")
                 if 'Time' in df.columns and df['Time'].notna().any():
                     chart_df = df.dropna(subset=['Time']).set_index('Time')[['Distance_cm', 'Vibration']]
                     st.line_chart(chart_df)
                 else:
-                    st.line_chart(df[['Distance_cm', 'Vibration']])
+                    st.line_chart(df.set_index('Seq')[['Distance_cm', 'Vibration']])
 
                 st.markdown("---")
 
@@ -237,7 +242,6 @@ if st.button("📊 로그 파싱 및 위험 시간대 분석", type="primary"):
                 quake_cnt = df['Quake_Danger'].sum()
                 total_danger_cnt = flood_cnt + quake_cnt
 
-                # 위험 발생 문구 바인딩
                 if total_danger_cnt > 0:
                     time_summary_text = most_frequent_time_str
                 else:
@@ -248,7 +252,7 @@ if st.button("📊 로그 파싱 및 위험 시간대 분석", type="primary"):
                 with rep_col1:
                     st.markdown("##### 🕒 1. 위험 발생 분석 요약")
                     st.markdown(f"""
-                    * **주요 위험 집중 시간대:** {time_summary_text}
+                    * **주요 위험 집중 구간:** {time_summary_text}
                     * **🌊 침수 심각 감지:** **{flood_cnt}회** (수위 0.5cm ~ 11.0cm)
                     * **⛰️ 산사태/지진 감지:** **{quake_cnt}회** (진동 수치 15 초과)
                     * **총 위험 이벤트:** 총 **{total_danger_cnt}회** 발생
