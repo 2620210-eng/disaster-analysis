@@ -1,147 +1,84 @@
-import streamlit as st
-import pandas as pd
-import re
+from flask import Flask, render_template, jsonify, request
+import serial
+import threading
+import time
+from datetime import datetime
 
-# 대시보드 기본 설정
-st.set_page_config(page_title="재난 관제 데이터 분석기", page_icon="🚨", layout="wide")
+app = Flask(__name__)
 
-# 사이드바 관제 센터
-st.sidebar.title("🛡️ 재난 관제 시스템")
-st.sidebar.success("● 시스템 상태: 가동 중")
-st.sidebar.info("연결 장치: 초음파 센서, 진동 센서, 모터 릴레이, 서보 차단막")
+# 아두이노 시리얼 포트 설정 (환경에 맞춰 'COM3', 'COM4' 또는 '/dev/ttyUSB0' 수정)
+SERIAL_PORT = 'COM3' 
+BAUD_RATE = 9600
 
-st.title("🚨 스마트 재난 대응 센서 & 시간대별 위험 분석기")
+data_logs = []
 
-# ----------------------------------------------------
-# 💡 [신규 추가] 사용 방법 및 개발 목적 안내 버튼/펼침상자
-# ----------------------------------------------------
-with st.expander("📖 시스템 사용 방법 및 개발 목적 (클릭하여 확인)", expanded=False):
-    st.markdown("""
-    ### 🎯 1. 개발 목적
-    * **임계값 기반 비상 제어:** 침수(수위) 및 지진(진동) 재난 발생 시 차단막 작동, 배수 펌프 가동, 경보 발령을 자동 수행하여 골든타임을 확보합니다.
-    * **오작동 방지 및 안정성 확보:** 센서 노이즈 필터링(0cm 무시) 및 경보 후 쿨타임 메커니즘을 적용하여 연쇄 오작동을 차단합니다.
-    * **데이터 기반 위험 관제:** 하드웨어 시리얼 로그를 실시간 파싱 및 통계 분석하여 위험이 집중되는 시간대를 시각화하고 사전 예방 체계를 구축합니다.
-
-    ---
-
-    ### 🛠️ 2. 시스템 사용 방법
-    1. **시리얼 로그 수집:** 아두이노 IDE 시리얼 모니터에서 타임스탬프가 포함된 로그 데이터를 복사합니다.
-    2. **데이터 입력:** 아래 텍스트 상자에 복사한 시리얼 로그를 그대로 붙여넣습니다.
-    3. **분석 실행:** `📊 로그 파싱 및 위험 시간대 분석` 버튼을 클릭합니다.
-    4. **결과 확인:** 
-       * **통계 요약:** 평균/최대/최소 수위 및 진동 수치 확인
-       * **골든타임 분석:** 침수/지진 감지 횟수 및 최다 위험 발생 시간대 확인
-       * **시계열 추이:** 시간에 따른 수위 및 진동 변화 그래프 확인
-    """)
-
-st.write("---")
-st.write("시리얼 모니터의 데이터를 복사해 붙여넣으면 시간대별 위험 분석 결과를 생성합니다.")
-
-# 1. 시리얼 로그 입력
-raw_text = st.text_area(
-    "센서 시리얼 로그 데이터 입력 (타임스탬프 포함)", 
-    height=200, 
-    placeholder="예시:\n15:58:03.807 -> 14.82,9\n15:58:05.571 -> 10.19,0\n15:58:09.179 -> 9.83,85"
-)
-
-# 2. 데이터 분석 실행
-if st.button("📊 로그 파싱 및 위험 시간대 분석"):
-    if not raw_text.strip():
-        st.warning("⚠️ 분석할 데이터를 입력해 주세요.")
-    else:
-        try:
-            parsed_data = []
-            
-            for line in raw_text.strip().splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                
-                time_str = None
-                data_str = line
-                
-                if '->' in line:
-                    parts = line.split('->')
-                    time_str = parts[0].strip()
-                    data_str = parts[1].strip()
-                
-                sensor_parts = data_str.split(',')
-                if len(sensor_parts) == 2:
+def read_serial():
+    global data_logs
+    try:
+        ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
+        time.sleep(2)
+        print(f"아두이노 연결 성공 ({SERIAL_PORT})")
+        
+        while True:
+            if ser.in_waiting > 0:
+                line = ser.readline().decode('utf-8', errors='ignore').strip()
+                if line:
                     try:
-                        dist = float(sensor_parts[0].strip())
-                        vib = float(sensor_parts[1].strip())
-                        
-                        time_match = re.search(r'(\d{2}:\d{2}:\d{2})', time_str) if time_str else None
-                        clean_time = time_match.group(1) if time_match else None
-                        
-                        parsed_data.append({
-                            'Time': clean_time,
-                            'Distance_cm': dist,
-                            'Vibration': vib
-                        })
+                        parts = line.split(',')
+                        if len(parts) == 2:
+                            dist = float(parts[0])
+                            vib = int(parts[1])
+                            
+                            # 상태 판별
+                            status = "정상"
+                            if vib > 15:
+                                status = "산사태 심각"
+                            elif 0.5 < dist <= 11.0:
+                                status = "침수 심각"
+                            elif 11.0 < dist <= 13.0:
+                                status = "수위 경고"
+                            elif 13.0 < dist <= 15.0:
+                                status = "수위 주의"
+                            elif dist > 15.0:
+                                status = "안전"
+                            else:
+                                status = "미감지"
+
+                            now_time = datetime.now().strftime('%H:%M:%S')
+                            
+                            log_entry = {
+                                "timestamp": now_time,
+                                "distance": dist,
+                                "vibration": vib,
+                                "status": status
+                            }
+                            
+                            data_logs.append(log_entry)
+                            # 최근 100개 데이터 유지
+                            if len(data_logs) > 100:
+                                data_logs.pop(0)
                     except ValueError:
-                        continue
-            
-            df = pd.DataFrame(parsed_data)
+                        pass
+            time.sleep(0.1)
+    except Exception as e:
+        print(f"시리얼 통신 오류: {e}")
 
-            if len(df) == 0:
-                st.error("❌ 유효한 센서 데이터를 찾지 못했습니다.")
-            else:
-                st.success(f"✅ 총 {len(df)}개 센서 로그 정상 파싱 완료!")
+# 시리얼 읽기 쓰레드 시작
+threading.Thread(target=read_serial, daemon=True).start()
 
-                # [분석 1] 센서 요약 통계
-                st.subheader("📈 통계 요약")
-                stats = pd.DataFrame({
-                    '수위 거리 (Distance_cm)': [
-                        df['Distance_cm'].mean(),
-                        df['Distance_cm'].max(),
-                        df['Distance_cm'].min(),
-                        df['Distance_cm'].std()
-                    ],
-                    '진동 수치 (Vibration)': [
-                        df['Vibration'].mean(),
-                        df['Vibration'].max(),
-                        df['Vibration'].min(),
-                        df['Vibration'].std()
-                    ]
-                }, index=['평균값', '최댓값', '최솟값', '표준편차'])
-                st.dataframe(stats.round(2), use_container_width=True)
+@app.route('/')
+def index():
+    return render_template('index.html')
 
-                # [분석 2] 위험 조건 카운트 및 집중 시간대 도출
-                df['Flood_Danger'] = (df['Distance_cm'] > 0.5) & (df['Distance_cm'] <= 11.0)
-                df['Quake_Danger'] = df['Vibration'] > 80.0
-                df['Is_Danger'] = df['Flood_Danger'] | df['Quake_Danger']
+@app.route('/api/data', methods=['GET'])
+def get_data():
+    return jsonify(data_logs)
 
-                danger_df = df[df['Is_Danger']]
+@app.route('/clear', methods=['POST'])
+def clear_data():
+    global data_logs
+    data_logs = []
+    return jsonify({"message": "모든 기록이 삭제되었습니다."})
 
-                st.subheader("⚠️ 위험 상황 및 골든타임 분석")
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.metric("침수 심각 감지 횟수", f"{df['Flood_Danger'].sum()}회")
-                with col2:
-                    st.metric("지진 감지 횟수", f"{df['Quake_Danger'].sum()}회")
-
-                if 'Time' in df.columns and df['Time'].notna().any():
-                    if len(danger_df) > 0 and danger_df['Time'].notna().any():
-                        danger_df['Hour_Min'] = danger_df['Time'].apply(lambda x: str(x)[:5] if pd.notna(x) else None)
-                        most_frequent_time = danger_df['Hour_Min'].mode()
-                        
-                        if not most_frequent_time.empty:
-                            st.error(f"🚨 **주요 위험 집중 시간대:** 약 **{most_frequent_time.iloc[0]}** 부근에 빈번한 위험이 감지되었습니다.")
-                        
-                        st.write("📋 **위험 이벤트 로그 목록:**")
-                        st.dataframe(danger_df[['Time', 'Distance_cm', 'Vibration']], use_container_width=True)
-                    else:
-                        st.info("✅ 데이터 수집 기간 내 위험 상태가 감지되지 않았습니다. (안전)")
-
-                # [분석 3] 시계열 그래프
-                st.subheader("📉 시간에 따른 센서 데이터 추이")
-                if 'Time' in df.columns and df['Time'].notna().any():
-                    chart_df = df.set_index('Time')[['Distance_cm', 'Vibration']]
-                    st.line_chart(chart_df)
-                else:
-                    st.line_chart(df[['Distance_cm', 'Vibration']])
-
-        except Exception as e:
-            st.error(f"❌ 데이터 분석 중 오류 발생: {e}")
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)
