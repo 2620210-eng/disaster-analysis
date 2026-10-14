@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>재난 감지 및 차단 시스템 관제</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #f4f7f6;
+      margin: 0;
+      padding: 20px;
+      color: #333;
+    }
+    h1 {
+      text-align: center;
+      color: #2c3e50;
+      margin-bottom: 20px;
+    }
+    .top-controls {
+      display: flex;
+      justify-content: flex-end;
+      max-width: 1200px;
+      margin: 0 auto 15px auto;
+    }
+    .btn-delete {
+      background-color: #e74c3c;
+      color: white;
+      border: none;
+      padding: 10px 18px;
+      font-size: 14px;
+      font-weight: bold;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .btn-delete:hover {
+      background-color: #c0392b;
+    }
+    .status-card {
+      background: white;
+      padding: 20px;
+      border-radius: 12px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+      margin-bottom: 25px;
+      text-align: center;
+      max-width: 1200px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .alert-box {
+      font-size: 22px;
+      font-weight: bold;
+      padding: 15px;
+      border-radius: 8px;
+      margin-top: 10px;
+    }
+    .alert-normal { background-color: #d4edda; color: #155724; }
+    .alert-warning { background-color: #fff3cd; color: #856404; }
+    .alert-danger { background-color: #f8d7da; color: #721c24; animation: blink 1s infinite; }
+    
+    @keyframes blink {
+      50% { opacity: 0.6; }
+    }
+
+    .section-title {
+      max-width: 1200px;
+      margin: 30px auto 10px auto;
+      font-size: 20px;
+      color: #2c3e50;
+      border-bottom: 2px solid #3498db;
+      padding-bottom: 5px;
+    }
+
+    .grid-container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      max-width: 1200px;
+      margin: 0 auto 25px auto;
+    }
+    @media (max-width: 768px) {
+      .grid-container { grid-template-columns: 1fr; }
+    }
+
+    .card {
+      background: white;
+      padding: 20px;
+      border-radius: 12px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.08);
+    }
+
+    .table-wrapper {
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: center;
+    }
+    th, td {
+      padding: 10px;
+      border-bottom: 1px solid #ddd;
+      font-size: 14px;
+    }
+    th {
+      background-color: #f8f9fa;
+      position: sticky;
+      top: 0;
+    }
+    .badge-flood {
+      background-color: #e74c3c;
+      color: white;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    .badge-landslide {
+      background-color: #8e44ad;
+      color: white;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>🚨 실시간 재난 감지 및 통합 관제 시스템</h1>
+
+  <div class="top-controls">
+    <button class="btn-delete" onclick="clearData()">🗑️ 전체 기록 삭제</button>
+  </div>
+
+  <div class="status-card">
+    <h2>현재 감지 상태</h2>
+    <div id="alertBox" class="alert-box alert-normal">데이터 수신 대기 중...</div>
+    <p style="margin-top:15px; color:#666;">
+      수위(거리): <span id="curDist" style="font-weight:bold; color:#000;">-</span> cm | 
+      진동 수치: <span id="curVib" style="font-weight:bold; color:#000;">-</span>
+    </p>
+  </div>
+
+  <div class="section-title">⚡ 심각 경보 발생 요약 (간단 버전)</div>
+  <div class="grid-container">
+    <div class="card">
+      <h3>📋 심각 경보 발생 목록</h3>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>시각 (시간)</th>
+              <th>경보 유형</th>
+              <th>상태</th>
+            </tr>
+          </thead>
+          <tbody id="criticalTableBody">
+            <tr><td colspan="3">경보 기록이 없습니다.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>📊 경보 유형별 발생 횟수</h3>
+      <canvas id="criticalSummaryChart"></canvas>
+    </div>
+  </div>
+
+  <div class="section-title">📈 실시간 상세 측정 데이터</div>
+  <div class="grid-container">
+    <div class="card">
+      <h3>실시간 센서 수치 변화</h3>
+      <canvas id="sensorChart"></canvas>
+    </div>
+
+    <div class="card">
+      <h3>전체 데이터 로그</h3>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>시각</th>
+              <th>수위 (cm)</th>
+              <th>진동</th>
+              <th>단계</th>
+            </tr>
+          </thead>
+          <tbody id="fullLogTableBody">
+            <tr><td colspan="4">기록된 데이터가 없습니다.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const ctxSensor = document.getElementById('sensorChart').getContext('2d');
+    const sensorChart = new Chart(ctxSensor, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [
+          {
+            label: '수위 거리 (cm)',
+            borderColor: '#3498db',
+            data: [],
+            fill: false,
+            yAxisID: 'y'
+          },
+          {
+            label: '진동 수치',
+            borderColor: '#e74c3c',
+            data: [],
+            fill: false,
+            yAxisID: 'y1'
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        scales: {
+          y: { type: 'linear', position: 'left', title: { display: true, text: '거리 (cm)' } },
+          y1: { type: 'linear', position: 'right', title: { display: true, text: '진동' }, grid: { drawOnChartArea: false } }
+        }
+      }
+    });
+
+    const ctxSummary = document.getElementById('criticalSummaryChart').getContext('2d');
+    const summaryChart = new Chart(ctxSummary, {
+      type: 'doughnut',
+      data: {
+        labels: ['침수 심각', '산사태 감지'],
+        datasets: [{
+          data: [0, 0],
+          backgroundColor: ['#e74c3c', '#8e44ad']
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { position: 'bottom' }
+        }
+      }
+    });
+
+    function clearData() {
+      if (confirm("모든 감지 기록과 경보 이력을 삭제하시겠습니까?")) {
+        fetch('/clear', { method: 'POST' })
+          .then(res => res.json())
+          .then(data => {
+            alert(data.message || "기록이 삭제되었습니다.");
+            location.reload();
+          })
+          .catch(err => console.error("삭제 실패:", err));
+      }
+    }
+
+    function fetchUpdates() {
+      fetch('/api/data')
+        .then(res => res.json())
+        .then(data => {
+          if (!data || data.length === 0) return;
+
+          const latest = data[data.length - 1];
+          document.getElementById('curDist').innerText = latest.distance.toFixed(1);
+          document.getElementById('curVib').innerText = latest.vibration;
+
+          const alertBox = document.getElementById('alertBox');
+          if (latest.status.includes('침수') || latest.status.includes('산사태')) {
+            alertBox.className = 'alert-box alert-danger';
+            alertBox.innerText = `🚨 ${latest.status} 발생!`;
+          } else if (latest.status.includes('경고') || latest.status.includes('주의')) {
+            alertBox.className = 'alert-box alert-warning';
+            alertBox.innerText = `⚠️ ${latest.status}`;
+          } else {
+            alertBox.className = 'alert-box alert-normal';
+            alertBox.innerText = `🟢 정상 상태 (${latest.status})`;
+          }
+
+          const times = [];
+          const distances = [];
+          const vibrations = [];
+          
+          let criticalHtml = '';
+          let fullLogHtml = '';
+          let floodCount = 0;
+          let landslideCount = 0;
+
+          data.forEach(item => {
+            times.push(item.timestamp);
+            distances.push(item.distance);
+            vibrations.push(item.vibration);
+
+            if (item.status.includes('침수')) {
+              floodCount++;
+              criticalHtml = `<tr>
+                <td>${item.timestamp}</td>
+                <td><span class="badge-flood">🌊 침수 경보</span></td>
+                <td style="color:red; font-weight:bold;">심각</td>
+              </tr>` + criticalHtml;
+            } else if (item.status.includes('산사태')) {
+              landslideCount++;
+              criticalHtml = `<tr>
+                <td>${item.timestamp}</td>
+                <td><span class="badge-landslide">⛰️ 산사태 경보</span></td>
+                <td style="color:red; font-weight:bold;">심각</td>
+              </tr>` + criticalHtml;
+            }
+
+            fullLogHtml = `<tr>
+              <td>${item.timestamp}</td>
+              <td>${item.distance.toFixed(1)}</td>
+              <td>${item.vibration}</td>
+              <td>${item.status}</td>
+            </tr>` + fullLogHtml;
+          });
+
+          sensorChart.data.labels = times.slice(-20);
+          sensorChart.data.datasets[0].data = distances.slice(-20);
+          sensorChart.data.datasets[1].data = vibrations.slice(-20);
+          sensorChart.update();
+
+          summaryChart.data.datasets[0].data = [floodCount, landslideCount];
+          summaryChart.update();
+
+          document.getElementById('criticalTableBody').innerHTML = criticalHtml || '<tr><td colspan="3">경보 기록이 없습니다.</td></tr>';
+          document.getElementById('fullLogTableBody').innerHTML = fullLogHtml;
+        });
+    }
+
+    setInterval(fetchUpdates, 2000);
+  </script>
+</body>
+</html>
