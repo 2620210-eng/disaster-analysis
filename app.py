@@ -72,7 +72,7 @@ def evaluate_status(dist, vib):
 raw_text = st.text_area(
     "센서 시리얼 로그 데이터 입력 (타임스탬프 포함)", 
     height=200, 
-    placeholder="예시:\n15:58:03.807 -> 14.82,9\n15:58:05.571 -> 10.19,0\n15:58:09.179 -> 9.83,85",
+    placeholder="예시:\n14:29:03.031 -> [00:01:44 / 104089ms] 12.98,0\n15:58:05.571 -> 10.19,0\n15:58:09.179 -> 9.83,85",
     key="raw_text_input"
 )
 
@@ -93,17 +93,23 @@ if st.button("📊 로그 파싱 및 위험 시간대 분석", type="primary"):
                 time_str = None
                 data_str = line
                 
+                # 1) '->' 기준으로 시간 영역과 데이터 영역 분리
                 if '->' in line:
-                    parts = line.split('->')
+                    parts = line.split('->', 1)
                     time_str = parts[0].strip()
                     data_str = parts[1].strip()
                 
+                # 2) 대괄호 [ ... ] 내부 문자열 제거 (예: [00:01:44 / 104089ms] 삭제)
+                data_str = re.sub(r'\[.*?\]', '', data_str).strip()
+                
+                # 3) 거리 및 진동값 쉼표(,) 추출
                 sensor_parts = data_str.split(',')
                 if len(sensor_parts) == 2:
                     try:
                         dist = float(sensor_parts[0].strip())
                         vib = float(sensor_parts[1].strip())
                         
+                        # HH:MM:SS 시각 정규식 추출
                         time_match = re.search(r'(\d{2}:\d{2}:\d{2})', time_str) if time_str else None
                         clean_time = time_match.group(1) if time_match else None
                         
@@ -213,7 +219,7 @@ if st.button("📊 로그 파싱 및 위험 시간대 분석", type="primary"):
 
                 st.markdown("---")
 
-                # [분석 5] 📋 종합 관제 요약 및 자동 대처 보고서 (오류 수정 완료)
+                # [분석 5] 📋 종합 관제 요약 및 자동 대처 보고서
                 st.subheader("📋 종합 관제 요약 & 시스템 대처 리포트")
 
                 flood_cnt = df['Flood_Danger'].sum()
