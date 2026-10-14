@@ -1,84 +1,90 @@
-from flask import Flask, render_template, jsonify, request
-import serial
-import threading
+import streamlit as st
+import pandas as pd
+import numpy as np
 import time
-from datetime import datetime
 
-app = Flask(__name__)
+st.set_page_config(page_title="재난 감지 및 통합 관제 시스템", layout="wide")
 
-# 아두이노 시리얼 포트 설정 (환경에 맞춰 'COM3', 'COM4' 또는 '/dev/ttyUSB0' 수정)
-SERIAL_PORT = 'COM3' 
-BAUD_RATE = 9600
+st.title("🚨 실시간 재난 감지 및 통합 관제 시스템")
 
-data_logs = []
+# 세션 상태 초기화 (데이터 저장용)
+if "logs" not in st.session_state:
+    st.session_state.logs = []
 
-def read_serial():
-    global data_logs
-    try:
-        ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
-        time.sleep(2)
-        print(f"아두이노 연결 성공 ({SERIAL_PORT})")
+# 삭제 버튼
+col_title, col_btn = st.columns([4, 1])
+with col_btn:
+    if st.button("🗑️ 전체 기록 삭제", use_container_width=True):
+        st.session_state.logs = []
+        st.success("모든 기록이 삭제되었습니다.")
+
+# 최신 상태 표시
+st.subheader("현재 감지 상태")
+if len(st.session_state.logs) > 0:
+    latest = st.session_state.logs[-1]
+    dist_val = latest["수위(cm)"]
+    vib_val = latest["진동"]
+    status_val = latest["상태"]
+    
+    if "심각" in status_val:
+        st.error(f"🚨 경보 발생: {status_val}")
+    elif "경고" in status_val or "주의" in status_val:
+        st.warning(f"⚠️ 상태: {status_val}")
+    else:
+        st.success(f"🟢 상태: {status_val}")
         
-        while True:
-            if ser.in_waiting > 0:
-                line = ser.readline().decode('utf-8', errors='ignore').strip()
-                if line:
-                    try:
-                        parts = line.split(',')
-                        if len(parts) == 2:
-                            dist = float(parts[0])
-                            vib = int(parts[1])
-                            
-                            # 상태 판별
-                            status = "정상"
-                            if vib > 15:
-                                status = "산사태 심각"
-                            elif 0.5 < dist <= 11.0:
-                                status = "침수 심각"
-                            elif 11.0 < dist <= 13.0:
-                                status = "수위 경고"
-                            elif 13.0 < dist <= 15.0:
-                                status = "수위 주의"
-                            elif dist > 15.0:
-                                status = "안전"
-                            else:
-                                status = "미감지"
+    st.write(f"**수위(거리):** {dist_val:.1f} cm | **진동 수치:** {vib_val}")
+else:
+    st.info("데이터 수신 대기 중...")
 
-                            now_time = datetime.now().strftime('%H:%M:%S')
-                            
-                            log_entry = {
-                                "timestamp": now_time,
-                                "distance": dist,
-                                "vibration": vib,
-                                "status": status
-                            }
-                            
-                            data_logs.append(log_entry)
-                            # 최근 100개 데이터 유지
-                            if len(data_logs) > 100:
-                                data_logs.pop(0)
-                    except ValueError:
-                        pass
-            time.sleep(0.1)
-    except Exception as e:
-        print(f"시리얼 통신 오류: {e}")
+st.markdown("---")
 
-# 시리얼 읽기 쓰레드 시작
-threading.Thread(target=read_serial, daemon=True).start()
+# 1. 심각 경보 발생 요약
+st.subheader("⚡ 심각 경보 발생 요약 (간단 버전)")
+df_all = pd.DataFrame(st.session_state.logs)
 
-@app.route('/')
-def index():
-    return render_template('index.html')
+col1, col2 = st.columns(2)
 
-@app.route('/api/data', methods=['GET'])
-def get_data():
-    return jsonify(data_logs)
+with col1:
+    st.markdown("##### 📋 심각 경보 발생 목록")
+    if not df_all.empty:
+        critical_df = df_all[df_all["상태"].str.contains("심각", na=False)]
+        if not critical_df.empty:
+            st.dataframe(critical_df[["시각", "상태"]], use_container_width=True)
+        else:
+            st.write("경보 기록이 없습니다.")
+    else:
+        st.write("기록된 데이터가 없습니다.")
 
-@app.route('/clear', methods=['POST'])
-def clear_data():
-    global data_logs
-    data_logs = []
-    return jsonify({"message": "모든 기록이 삭제되었습니다."})
+with col2:
+    st.markdown("##### 📊 경보 유형별 발생 횟수")
+    if not df_all.empty:
+        flood_count = len(df_all[df_all["상태"].str.contains("침수", na=False)])
+        landslide_count = len(df_all[df_all["상태"].str.contains("산사태", na=False)])
+        summary_data = pd.DataFrame({
+            "유형": ["침수 심각", "산사태 감지"],
+            "횟수": [flood_count, landslide_count]
+        })
+        st.bar_chart(summary_data.set_index("유형"))
+    else:
+        st.write("데이터가 없습니다.")
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+st.markdown("---")
+
+# 2. 실시간 상세 데이터 및 로그
+st.subheader("📈 실시간 상세 측정 데이터")
+col3, col4 = st.columns(2)
+
+with col3:
+    st.markdown("##### 실시간 센서 수치 변화")
+    if not df_all.empty:
+        st.line_chart(df_all.set_index("시각")[["수위(cm)", "진동"]])
+    else:
+        st.write("차트 데이터가 없습니다.")
+
+with col4:
+    st.markdown("##### 전체 데이터 로그")
+    if not df_all.empty:
+        st.dataframe(df_all.iloc[::-1], use_container_width=True)
+    else:
+        st.write("기록된 데이터가 없습니다.")
